@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Splat Walkthrough</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #111; }
+
+    /* ── Scene picker ──────────────────────────────────────────────────────── */
+    #scene-picker {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 10, 10, 0.95);
+      z-index: 500;
+      font-family: system-ui, sans-serif;
+      color: white;
+      gap: 24px;
+    }
+    #scene-picker h1 {
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      margin: 0;
+      color: #eee;
+    }
+    #scene-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 340px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+    .scene-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 12px 18px;
+      color: white;
+      text-align: left;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.15s;
+    }
+    .scene-btn:hover { background: rgba(255,255,255,0.14); }
+    .scene-btn .scene-type {
+      font-size: 10px;
+      color: #777;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .scene-btn .scene-type.nvs { color: #7bc8a4; }
+
+    /* ── Loading bar ────────────────────────────────────────────────────────── */
+    #loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(10,10,10,0.88);
+      z-index: 400;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      font-family: system-ui, sans-serif;
+      color: white;
+    }
+    #loading-overlay.visible { display: flex; }
+    #loading-label { font-size: 15px; color: #aaa; }
+    #loading-bar-track {
+      width: 300px;
+      height: 3px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    #loading-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: #7bc8a4;
+      border-radius: 2px;
+      transition: width 0.2s ease;
+    }
+
+    /* ── Pointer-lock splash ────────────────────────────────────────────────── */
+    #click-to-start {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.8);
+      padding: 30px 50px;
+      border-radius: 12px;
+      color: white;
+      font-family: system-ui, sans-serif;
+      font-size: 18px;
+      z-index: 200;
+      text-align: center;
+      cursor: pointer;
+    }
+    #click-to-start span {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+
+    /* ── HUD ────────────────────────────────────────────────────────────────── */
+    #hud {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      padding: 10px 22px;
+      border-radius: 8px;
+      color: white;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      z-index: 100;
+      pointer-events: none;
+      text-align: center;
+      transition: opacity 0.4s;
+    }
+    #hud.visible { display: block; }
+
+    /* ── Explore-segments button ───────────────────────────────────────────── */
+    #explore-btn {
+      display: none;
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(123, 200, 164, 0.15);
+      border: 1px solid rgba(123, 200, 164, 0.4);
+      border-radius: 8px;
+      padding: 10px 18px;
+      color: #7bc8a4;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      z-index: 200;
+      pointer-events: auto;
+      transition: background 0.15s;
+    }
+    #explore-btn:hover { background: rgba(123, 200, 164, 0.25); }
+    #explore-btn.loading { color: #666; border-color: rgba(255,255,255,0.1); pointer-events: none; }
+
+    /* ── Scene title + back button ─────────────────────────────────────────── */
+    #scene-title {
+      display: none;
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      color: rgba(255,255,255,0.4);
+      z-index: 100;
+      pointer-events: none;
+      letter-spacing: 0.04em;
+    }
+    #back-btn {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 9px 16px;
+      color: #aaa;
+      font-family: system-ui, sans-serif;
+      font-size: 12px;
+      cursor: pointer;
+      z-index: 200;
+    }
+    #back-btn:hover { background: rgba(255,255,255,0.15); }
+  </style>
+</head>
+<body>
+
+<!-- ── Scene picker ───────────────────────────────────────────────────────── -->
+<div id="scene-picker">
+  <h1>Choose a scene</h1>
+  <div id="scene-list"><div style="color:#666;font-size:13px">Loading library…</div></div>
+</div>
+
+<!-- ── Loading overlay ───────────────────────────────────────────────────── -->
+<div id="loading-overlay">
+  <div id="loading-label">Loading…</div>
+  <div id="loading-bar-track"><div id="loading-bar-fill"></div></div>
+</div>
+
+<!-- ── In-scene UI ───────────────────────────────────────────────────────── -->
+<div id="click-to-start">
+  Click to explore
+  <span>
+    WASD — move &nbsp;·&nbsp; Mouse — look &nbsp;·&nbsp; Scroll — zoom<br>
+    Shift — faster &nbsp;·&nbsp; Space — next segment &nbsp;·&nbsp; ESC — release cursor
+  </span>
+</div>
+
+<div id="hud">
+  WASD — move &nbsp;·&nbsp; Mouse — look &nbsp;·&nbsp; Scroll — zoom &nbsp;·&nbsp; Shift — faster
+</div>
+
+<div id="explore-btn">Explore segments ✦</div>
+<div id="scene-title"></div>
+<button id="back-btn">← scenes</button>
+
+<!-- ── Three.js importmap ─────────────────────────────────────────────────── -->
+<script type="importmap">
+{
+  "imports": {
+    "three":             "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.178.0/three.module.js",
+    "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js"
+  }
+}
+</script>
+
+<!-- ── App ───────────────────────────────────────────────────────────────── -->
+<script type="module">
+  import { AssetLibrary, SceneType } from './src/assetLibrary.js';
+  import { SceneManager }            from './src/sceneManager.js';
+  import { GameMode }                from './src/gameMode.js';
+
+  // ── DOM refs ────────────────────────────────────────────────────────────────
+  const pickerEl      = document.getElementById('scene-picker');
+  const sceneListEl   = document.getElementById('scene-list');
+  const loadingEl     = document.getElementById('loading-overlay');
+  const loadingLabel  = document.getElementById('loading-label');
+  const loadingFill   = document.getElementById('loading-bar-fill');
+  const clickToStart  = document.getElementById('click-to-start');
+  const hudEl         = document.getElementById('hud');
+  const exploreBtn    = document.getElementById('explore-btn');
+  const sceneTitleEl  = document.getElementById('scene-title');
+  const backBtn       = document.getElementById('back-btn');
+
+  // ── Bootstrap ───────────────────────────────────────────────────────────────
+  const library = new AssetLibrary('./assets/manifest.json', './assets/');
+  await library.load();
+
+  const manager  = new SceneManager(null, { onEvent: handleSceneEvent });
+  const gameMode = new GameMode(manager, document.body);
+
+  // ── Scene picker ─────────────────────────────────────────────────────────────
+  populatePicker(library.getBrowsable());
+
+  // ── Default scene ────────────────────────────────────────────────────────────
+  const DEFAULT_SCENE_ID = 'pine_knob';
+  const defaultScene = library.getById(DEFAULT_SCENE_ID);
+  if (defaultScene) openScene(defaultScene);
+
+  function populatePicker(scenes) {
+    sceneListEl.innerHTML = '';
+    for (const scene of scenes) {
+      const btn = document.createElement('button');
+      btn.className = 'scene-btn';
+
+      const typeLabel = scene.type === SceneType.ON_THE_FLY_NVS
+        ? `<span class="scene-type nvs">on-the-fly NVS · ${scene.anchors.length} anchors</span>`
+        : `<span class="scene-type">${(scene.format ?? 'ply').toUpperCase()}</span>`;
+
+      btn.innerHTML = `<span>${scene.displayName}</span>${typeLabel}`;
+      btn.addEventListener('click', () => openScene(scene));
+      sceneListEl.appendChild(btn);
+    }
+  }
+
+  // ── Open a scene ─────────────────────────────────────────────────────────────
+  async function openScene(scene) {
+    pickerEl.style.display = 'none';
+    loadingEl.classList.add('visible');
+    loadingLabel.textContent = `Loading "${scene.displayName}"…`;
+    loadingFill.style.width = '0%';
+
+    exploreBtn.style.display  = 'none';
+    sceneTitleEl.style.display = 'none';
+    backBtn.style.display      = 'none';
+
+    await manager.switchScene(scene, library);
+    // loadDone event fires and handles the rest
+  }
+
+  // ── Scene lifecycle events ────────────────────────────────────────────────────
+  function handleSceneEvent(event) {
+    switch (event.type) {
+
+      case 'loadProgress': {
+        const pct = Math.round((event.n / event.total) * 100);
+        loadingFill.style.width = pct + '%';
+        loadingLabel.textContent =
+          `Loading anchor ${event.n} of ${event.total} — "${event.scene.displayName}"`;
+        break;
+      }
+
+      case 'loadDone': {
+        loadingEl.classList.remove('visible');
+        loadingFill.style.width = '100%';
+
+        // Show pointer-lock prompt
+        clickToStart.style.display = 'block';
+        backBtn.style.display = 'block';
+
+        sceneTitleEl.textContent = event.scene.displayName;
+        sceneTitleEl.style.display = 'block';
+
+        // Show explore button if segments already cached, else show loading state
+        if (library.hasSegments(event.scene)) {
+          exploreBtn.textContent = 'Loading segments…';
+          exploreBtn.classList.add('loading');
+          exploreBtn.style.display = 'block';
+        }
+        break;
+      }
+
+      case 'segmentReady': {
+        const total   = event.totalExpected;
+        const loaded  = manager.segments.length;
+        exploreBtn.textContent = `Loading segments… (${loaded}/${total})`;
+        break;
+      }
+
+      case 'allSegmentsReady': {
+        exploreBtn.textContent = `Explore segments (${event.segments.length}) ✦`;
+        exploreBtn.classList.remove('loading');
+        exploreBtn.style.display = 'block';
+        break;
+      }
+
+      case 'locked': {
+        clickToStart.style.display = 'none';
+        hudEl.classList.add('visible');
+        break;
+      }
+
+      case 'unlocked': {
+        if (!gameMode.isActive) {
+          clickToStart.style.display = 'block';
+        }
+        hudEl.classList.remove('visible');
+        break;
+      }
+    }
+  }
+
+  // ── Explore button ───────────────────────────────────────────────────────────
+  exploreBtn.addEventListener('click', () => {
+    if (manager.segments.length === 0) return;
+    exploreBtn.style.display = 'none';
+    document.exitPointerLock();
+    gameMode.activate(manager.segments);
+  });
+
+  // ── Back button ───────────────────────────────────────────────────────────────
+  backBtn.addEventListener('click', () => {
+    document.exitPointerLock();
+    if (gameMode.isActive) gameMode.deactivate();
+    clickToStart.style.display = 'none';
+    hudEl.classList.remove('visible');
+    backBtn.style.display       = 'none';
+    sceneTitleEl.style.display  = 'none';
+    exploreBtn.style.display    = 'none';
+    pickerEl.style.display      = 'flex';
+  });
+
+  // ── SPACE key → game mode advance ────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && gameMode.isActive) {
+      e.preventDefault();
+      gameMode.onKeySpace();
+    }
+  });
+
+  // ── Pointer lock from click-to-start ─────────────────────────────────────────
+  clickToStart.addEventListener('click', () => {
+    manager.requestPointerLock();
+  });
+</script>
+
+</body>
+</html>
