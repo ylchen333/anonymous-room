@@ -118,12 +118,39 @@ export class SceneManager {
     for (const s of this._segments) s.mesh.visible = true;
   }
 
+  /** Keep every segment visible and hide the original anchor splats. */
+  showAllSegments() {
+    if (!this._loaded) return;
+    for (const m of this._loaded.anchorMeshes) m.visible = false;
+    for (const s of this._segments) s.mesh.visible = true;
+  }
+
   /** Show only a specific segment by clusterId; hide all others. */
   isolateSegment(clusterId) {
     for (const s of this._segments) {
       s.mesh.visible = (s.meta.clusterId === clusterId);
     }
     for (const m of this._loaded?.anchorMeshes ?? []) m.visible = false;
+  }
+
+  /** Move the camera toward a segment centroid and look at it. */
+  focusSegment(clusterId) {
+    const entry = this._segments.find(s => s.meta.clusterId === clusterId);
+    const centroid = entry?.meta?.centroid;
+    if (!Array.isArray(centroid) || centroid.length !== 3) return;
+
+    const target = new THREE.Vector3(centroid[0], -centroid[1], -centroid[2]);
+    const fromCamera = target.clone().sub(this.camera.position);
+    if (fromCamera.lengthSq() < 1e-6) {
+      fromCamera.set(0, 0, -1);
+    }
+    fromCamera.normalize();
+
+    const standOff = 0.18;
+    this.camera.position.copy(target.clone().sub(fromCamera.multiplyScalar(standOff)));
+    this.camera.lookAt(target);
+    this._euler.setFromQuaternion(this.camera.quaternion);
+    this._velocity.set(0, 0, 0);
   }
 
   /** Restore anchors; hide all segment meshes. */
@@ -135,10 +162,56 @@ export class SceneManager {
 
   get segments() { return this._segments; }
   get canvas()   { return this.renderer.domElement; }
+  get cameraRef() { return this.camera; }
+
+  findSegmentByClusterId(clusterId) {
+    return this._segments.find(s => s.meta.clusterId === clusterId) ?? null;
+  }
+
+  findFirstAnnotatedSegment(predicate = defaultAnnotationPredicate) {
+    return this._segments.find(({ meta }) => predicate(meta)) ?? null;
+  }
+
+  pickSegmentFromScreenPoint(clientX, clientY, predicate = () => true) {
+    if (this._segments.length === 0) return null;
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+
+    let best = null;
+    let bestDistance = Infinity;
+
+    for (const entry of this._segments) {
+      if (!predicate(entry.meta)) continue;
+
+      const centroid = entry.meta?.centroid;
+      if (!Array.isArray(centroid) || centroid.length !== 3) continue;
+
+      const worldPoint = new THREE.Vector3(centroid[0], -centroid[1], -centroid[2]);
+      const screenPoint = worldPoint.clone().project(this.camera);
+
+      if (screenPoint.z < -1 || screenPoint.z > 1) continue;
+
+      const screenX = rect.left + ((screenPoint.x + 1) * 0.5 * rect.width);
+      const screenY = rect.top + (((1 - screenPoint.y) * 0.5) * rect.height);
+      const distance = Math.hypot(screenX - clientX, screenY - clientY);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = entry;
+      }
+    }
+
+    return bestDistance <= 56 ? best : null;
+  }
 
   /** Request pointer lock so WASD/mouse controls activate. */
   requestPointerLock() {
     this.renderer.domElement.requestPointerLock();
+  }
+
+  setKeyState(code, pressed) {
+    this._keys[code] = pressed;
   }
 
   // ── Events & animation loop ──────────────────────────────────────────────────
@@ -198,7 +271,7 @@ export class SceneManager {
     if (this._keys['KeyS'])  this._direction.sub(fwd);
     if (this._keys['KeyD'])  this._direction.add(right);
     if (this._keys['KeyA'])  this._direction.sub(right);
-    if (this._keys['Space']) this._direction.y += 1;
+    if (this._keys['KeyE'])  this._direction.y += 1;
     if (this._keys['KeyQ'])  this._direction.y -= 1;
 
     if (this._direction.lengthSq() > 0) {
@@ -277,6 +350,11 @@ export class SceneManager {
       if (meshes[i].visible) meshes[i].opacity = weights[i];
     }
   }
+}
+
+function defaultAnnotationPredicate(meta) {
+  const text = meta?.text?.trim();
+  return Boolean(text && text.toLowerCase() !== 'null');
 }
 
 /**

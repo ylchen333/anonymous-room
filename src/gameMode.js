@@ -45,7 +45,7 @@ export class GameMode {
   activate(segments) {
     if (segments.length === 0) return;
 
-    this._segments = [...segments].sort((a, b) => a.meta.clusterId - b.meta.clusterId);
+    this._segments = [...segments].filter(({ meta }) => meta.visible !== false).sort((a, b) => a.meta.clusterId - b.meta.clusterId);
     this._cursor   = -1;
     this._revealed = [];
     this._active   = true;
@@ -60,6 +60,11 @@ export class GameMode {
   deactivate() {
     this._active = false;
     this.manager.exitSegmentMode();
+    this._summaryEl.style.display = 'none';
+    this._summaryEl.innerHTML = '';
+    this._setLabelCard(null);
+    this._updateRevealButton('Reveal first object →');
+    this._revealBtn.onclick = () => this._advance();
     this._overlay.style.display = 'none';
   }
 
@@ -82,6 +87,7 @@ export class GameMode {
 
     const entry = this._segments[this._cursor];
     this.manager.isolateSegment(entry.meta.clusterId);
+    this.manager.focusSegment(entry.meta.clusterId);
     this._revealed.push(entry.meta);
 
     this._setLabelCard(entry.meta);
@@ -184,6 +190,28 @@ export class GameMode {
         color: #aaa;
         margin-top: 4px;
       }
+      .gs-label-meta {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .gs-label-tag {
+        font-size: 11px;
+        color: #d8d8d8;
+        border: 1px solid rgba(255,255,255,0.14);
+        border-radius: 999px;
+        padding: 4px 8px;
+        background: rgba(255,255,255,0.05);
+      }
+      .gs-label-note {
+        margin-top: 12px;
+        max-width: 360px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #e5e5e5;
+      }
       .gs-color-dot {
         display: inline-block;
         width: 10px;
@@ -279,11 +307,18 @@ export class GameMode {
     const countNote = meta.gaussianCount != null
       ? `<div class="gs-label-count">${meta.gaussianCount.toLocaleString()} Gaussians</div>`
       : '';
+    const tags = [meta.theme, meta.room].filter(Boolean)
+      .map(tag => `<span class="gs-label-tag">${tag}</span>`)
+      .join('');
+    const metaRow = tags ? `<div class="gs-label-meta">${tags}</div>` : '';
+    const note = meta.text ? `<div class="gs-label-note">${meta.text}</div>` : '';
 
     this._labelCardEl.innerHTML = `
       <div class="gs-cluster-id">Cluster ${meta.clusterId}</div>
       <div class="gs-label-text">${dot}${label}</div>
       ${countNote}
+      ${metaRow}
+      ${note}
     `;
   }
 

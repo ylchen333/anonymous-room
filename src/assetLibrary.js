@@ -1,7 +1,7 @@
 /**
  * assetLibrary.js
  *
- * Loads and exposes the asset manifest.  Provides helpers for:
+ * Loads and exposes a scene asset manifest.  Provides helpers for:
  *   - Fetching the manifest JSON
  *   - Looking up scenes by id
  *   - Detecting the "type" of a scene (single / on_the_fly_nvs)
@@ -27,10 +27,10 @@ export const SplatFormat = Object.freeze({
 
 export class AssetLibrary {
   /**
-   * @param {string} manifestUrl  URL of assets/manifest.json (relative to page)
+   * @param {string} manifestUrl  URL of assets/[scene]_manifest.json (relative or absolute)
    * @param {string} assetsBase   Base URL prepended to all asset paths in manifest
    */
-  constructor(manifestUrl = './assets/manifest.json', assetsBase = './assets/') {
+  constructor(manifestUrl = './assets/scene_manifest.json', assetsBase = './assets/') {
     this.manifestUrl = manifestUrl;
     this.assetsBase  = assetsBase;
     /** @type {ManifestScene[]} */

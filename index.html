@@ -5,222 +5,147 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Splat Walkthrough</title>
   <style>
+    :root {
+      --bg: #111111;
+      --panel: rgba(12, 14, 16, 0.82);
+      --panel-border: rgba(255, 255, 255, 0.16);
+      --text: #e8e8e8;
+      --muted: #9aa0a6;
+      --prompt: #7ed3a6;
+      --warning: #f0cf73;
+    }
+
     *, *::before, *::after { box-sizing: border-box; }
-    body { margin: 0; overflow: hidden; background: #111; }
 
-    /* ── Scene picker ──────────────────────────────────────────────────────── */
-    #scene-picker {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(10, 10, 10, 0.95);
-      z-index: 500;
-      font-family: system-ui, sans-serif;
-      color: white;
-      gap: 24px;
-    }
-    #scene-picker h1 {
-      font-size: 22px;
-      font-weight: 500;
-      letter-spacing: 0.04em;
+    body {
       margin: 0;
-      color: #eee;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
     }
-    #scene-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      width: 340px;
-      max-height: 70vh;
-      overflow-y: auto;
-    }
-    .scene-btn {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 8px;
-      padding: 12px 18px;
-      color: white;
-      text-align: left;
-      cursor: pointer;
-      font-size: 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      transition: background 0.15s;
-    }
-    .scene-btn:hover { background: rgba(255,255,255,0.14); }
-    .scene-btn .scene-type {
-      font-size: 10px;
-      color: #777;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .scene-btn .scene-type.nvs { color: #7bc8a4; }
 
-    /* ── Loading bar ────────────────────────────────────────────────────────── */
     #loading-overlay {
-      display: none;
       position: fixed;
       inset: 0;
-      background: rgba(10,10,10,0.88);
-      z-index: 400;
+      display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 18px;
-      font-family: system-ui, sans-serif;
+      background: rgba(10, 10, 10, 0.9);
+      z-index: 400;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
       color: white;
     }
-    #loading-overlay.visible { display: flex; }
-    #loading-label { font-size: 15px; color: #aaa; }
-    #loading-bar-track {
-      width: 300px;
-      height: 3px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    #loading-bar-fill {
-      height: 100%;
-      width: 0%;
-      background: #7bc8a4;
-      border-radius: 2px;
-      transition: width 0.2s ease;
+
+    #loading-label {
+      font-size: 13px;
+      color: #c8c8c8;
     }
 
-    /* ── Pointer-lock splash ────────────────────────────────────────────────── */
+    #loading-bar-track {
+      width: min(340px, calc(100vw - 48px));
+      height: 3px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+
+    #loading-bar-fill {
+      width: 0%;
+      height: 100%;
+      background: var(--prompt);
+      transition: width 0.18s ease;
+    }
+
     #click-to-start {
       display: none;
       position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0,0,0,0.8);
-      padding: 30px 50px;
-      border-radius: 12px;
-      color: white;
-      font-family: system-ui, sans-serif;
-      font-size: 18px;
+      right: 22px;
+      bottom: 22px;
       z-index: 200;
-      text-align: center;
       cursor: pointer;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: var(--text);
+      letter-spacing: 0.01em;
     }
-    #click-to-start span {
-      display: block;
-      font-size: 12px;
-      color: #aaa;
-      margin-top: 10px;
+
+    #click-to-start .prompt {
+      background: rgba(0, 0, 0, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 16px 18px;
+      max-width: min(420px, calc(100vw - 32px));
       line-height: 1.6;
-    }
-
-    /* ── HUD ────────────────────────────────────────────────────────────────── */
-    #hud {
-      display: none;
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.6);
-      padding: 10px 22px;
-      border-radius: 8px;
-      color: white;
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-      z-index: 100;
-      pointer-events: none;
-      text-align: center;
-      transition: opacity 0.4s;
-    }
-    #hud.visible { display: block; }
-
-    /* ── Explore-segments button ───────────────────────────────────────────── */
-    #explore-btn {
-      display: none;
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      background: rgba(123, 200, 164, 0.15);
-      border: 1px solid rgba(123, 200, 164, 0.4);
-      border-radius: 8px;
-      padding: 10px 18px;
-      color: #7bc8a4;
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-      cursor: pointer;
-      z-index: 200;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
       pointer-events: auto;
-      transition: background 0.15s;
     }
-    #explore-btn:hover { background: rgba(123, 200, 164, 0.25); }
-    #explore-btn.loading { color: #666; border-color: rgba(255,255,255,0.1); pointer-events: none; }
 
-    /* ── Scene title + back button ─────────────────────────────────────────── */
-    #scene-title {
+    #terminal-overlay {
       display: none;
       position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-      color: rgba(255,255,255,0.4);
-      z-index: 100;
+      top: 18px;
+      left: 18px;
+      z-index: 150;
+      width: fit-content;
+      max-width: min(420px, calc(100vw - 36px));
+      padding: 14px 16px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
       pointer-events: none;
-      letter-spacing: 0.04em;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
     }
-    #back-btn {
-      display: none;
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 8px;
-      padding: 9px 16px;
-      color: #aaa;
-      font-family: system-ui, sans-serif;
-      font-size: 12px;
-      cursor: pointer;
-      z-index: 200;
+
+    #terminal-header {
+      margin-bottom: 6px;
     }
-    #back-btn:hover { background: rgba(255,255,255,0.15); }
+
+    #terminal-help {
+      color: var(--text);
+      margin-bottom: 0;
+    }
+
+    .terminal-prefix {
+      color: var(--text);
+    }
+
+    .terminal-prompt {
+      color: var(--prompt);
+    }
+
+    @media (max-width: 640px) {
+      #terminal-overlay {
+        top: 12px;
+        left: 12px;
+        width: calc(100vw - 24px);
+        padding: 12px 13px;
+      }
+    }
   </style>
 </head>
 <body>
 
-<!-- ── Scene picker ───────────────────────────────────────────────────────── -->
-<div id="scene-picker">
-  <h1>Choose a scene</h1>
-  <div id="scene-list"><div style="color:#666;font-size:13px">Loading library…</div></div>
-</div>
-
-<!-- ── Loading overlay ───────────────────────────────────────────────────── -->
 <div id="loading-overlay">
-  <div id="loading-label">Loading…</div>
+  <div id="loading-label">Loading scene…</div>
   <div id="loading-bar-track"><div id="loading-bar-fill"></div></div>
 </div>
 
-<!-- ── In-scene UI ───────────────────────────────────────────────────────── -->
 <div id="click-to-start">
-  Click to explore
-  <span>
-    WASD — move &nbsp;·&nbsp; Mouse — look &nbsp;·&nbsp; Scroll — zoom<br>
-    Shift — faster &nbsp;·&nbsp; Space — next segment &nbsp;·&nbsp; ESC — release cursor
-  </span>
+  <div class="prompt">click here to enable exploration
+esc to unlock camera
+click to inspect note</div>
 </div>
 
-<div id="hud">
-  WASD — move &nbsp;·&nbsp; Mouse — look &nbsp;·&nbsp; Scroll — zoom &nbsp;·&nbsp; Shift — faster
+<div id="terminal-overlay">
+  <div id="terminal-header"></div>
+  <div id="terminal-help"></div>
+  <div id="terminal-output"></div>
 </div>
 
-<div id="explore-btn">Explore segments ✦</div>
-<div id="scene-title"></div>
-<button id="back-btn">← scenes</button>
-
-<!-- ── Three.js importmap ─────────────────────────────────────────────────── -->
 <script type="importmap">
 {
   "imports": {
@@ -230,164 +155,273 @@
 }
 </script>
 
-<!-- ── App ───────────────────────────────────────────────────────────────── -->
 <script type="module">
-  import { AssetLibrary, SceneType } from './src/assetLibrary.js';
-  import { SceneManager }            from './src/sceneManager.js';
-  import { GameMode }                from './src/gameMode.js';
+  import * as THREE from 'three';
+  import { AssetLibrary } from './src/assetLibrary.js';
+  import { SceneManager } from './src/sceneManager.js';
 
-  // ── DOM refs ────────────────────────────────────────────────────────────────
-  const pickerEl      = document.getElementById('scene-picker');
-  const sceneListEl   = document.getElementById('scene-list');
-  const loadingEl     = document.getElementById('loading-overlay');
-  const loadingLabel  = document.getElementById('loading-label');
-  const loadingFill   = document.getElementById('loading-bar-fill');
-  const clickToStart  = document.getElementById('click-to-start');
-  const hudEl         = document.getElementById('hud');
-  const exploreBtn    = document.getElementById('explore-btn');
-  const sceneTitleEl  = document.getElementById('scene-title');
-  const backBtn       = document.getElementById('back-btn');
+  const TARGET_SCENE_ID = 'desk_longer';
+  const ASSET_BASE_URL = getConfiguredAssetBaseUrl();
+  const MANIFEST_URL = `${ASSET_BASE_URL}${TARGET_SCENE_ID}_manifest.json`;
 
-  // ── Bootstrap ───────────────────────────────────────────────────────────────
-  const library = new AssetLibrary('./assets/manifest.json', './assets/');
+  const loadingEl = document.getElementById('loading-overlay');
+  const loadingLabel = document.getElementById('loading-label');
+  const loadingFill = document.getElementById('loading-bar-fill');
+  const clickToStart = document.getElementById('click-to-start');
+  const terminalEl = document.getElementById('terminal-overlay');
+  const terminalHeaderEl = document.getElementById('terminal-header');
+  const terminalHelpEl = document.getElementById('terminal-help');
+  const terminalOutputEl = document.getElementById('terminal-output');
+
+  const library = new AssetLibrary(MANIFEST_URL, ASSET_BASE_URL);
   await library.load();
 
-  const manager  = new SceneManager(null, { onEvent: handleSceneEvent });
-  const gameMode = new GameMode(manager, document.body);
+  const scene = library.getById(TARGET_SCENE_ID) ?? library.getAll().find(entry => library.hasSegments(entry));
+  if (!scene) {
+    throw new Error('No annotated scene was found in the manifest.');
+  }
 
-  // ── Scene picker ─────────────────────────────────────────────────────────────
-  populatePicker(library.getBrowsable());
+  const manager = new SceneManager(null, { onEvent: handleSceneEvent });
+  const scenePromptName = scene.id.split('_')[0] || scene.id || 'scene';
+  const scenePathName = scene.room || scenePromptName;
+  const selectionHalo = buildSelectionHalo();
+  manager.scene.add(selectionHalo);
 
-  // ── Default scene ────────────────────────────────────────────────────────────
-  const DEFAULT_SCENE_ID = 'pine_knob';
-  const defaultScene = library.getById(DEFAULT_SCENE_ID);
-  if (defaultScene) openScene(defaultScene);
+  let segmentsReady = false;
+  let currentSelection = null;
+  let typewriterToken = 0;
+  setTerminalScene(scenePromptName);
 
-  function populatePicker(scenes) {
-    sceneListEl.innerHTML = '';
-    for (const scene of scenes) {
-      const btn = document.createElement('button');
-      btn.className = 'scene-btn';
+  await manager.switchScene(scene, library);
 
-      const typeLabel = scene.type === SceneType.ON_THE_FLY_NVS
-        ? `<span class="scene-type nvs">on-the-fly NVS · ${scene.anchors.length} anchors</span>`
-        : `<span class="scene-type">${(scene.format ?? 'ply').toUpperCase()}</span>`;
+  clickToStart.addEventListener('click', () => {
+    manager.requestPointerLock();
+  });
 
-      btn.innerHTML = `<span>${scene.displayName}</span>${typeLabel}`;
-      btn.addEventListener('click', () => openScene(scene));
-      sceneListEl.appendChild(btn);
+  manager.canvas.addEventListener('click', event => {
+    if (!segmentsReady) return;
+
+    const rect = manager.canvas.getBoundingClientRect();
+    const clientX = document.pointerLockElement === manager.canvas
+      ? rect.left + rect.width / 2
+      : event.clientX;
+    const clientY = document.pointerLockElement === manager.canvas
+      ? rect.top + rect.height / 2
+      : event.clientY;
+
+    const entry = manager.pickSegmentFromScreenPoint(clientX, clientY);
+    if (!entry) {
+      clearSelection();
+      return;
     }
-  }
 
-  // ── Open a scene ─────────────────────────────────────────────────────────────
-  async function openScene(scene) {
-    pickerEl.style.display = 'none';
-    loadingEl.classList.add('visible');
-    loadingLabel.textContent = `Loading "${scene.displayName}"…`;
-    loadingFill.style.width = '0%';
+    selectSegment(entry, { focus: false });
+  });
 
-    exploreBtn.style.display  = 'none';
-    sceneTitleEl.style.display = 'none';
-    backBtn.style.display      = 'none';
+  document.addEventListener('keydown', event => {
+    if (event.code !== 'Space' || !segmentsReady) return;
+    event.preventDefault();
+    event.stopPropagation();
+    manager.setKeyState('Space', false);
 
-    await manager.switchScene(scene, library);
-    // loadDone event fires and handles the rest
-  }
+    const nextEntry = getNextSegmentEntry();
+    if (nextEntry) {
+      selectSegment(nextEntry, { focus: true });
+    }
+  });
 
-  // ── Scene lifecycle events ────────────────────────────────────────────────────
+  document.addEventListener('keyup', event => {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      event.stopPropagation();
+      manager.setKeyState('Space', false);
+    }
+  });
+
   function handleSceneEvent(event) {
     switch (event.type) {
-
       case 'loadProgress': {
-        const pct = Math.round((event.n / event.total) * 100);
+        const pct = Math.round((event.n / event.total) * 45);
         loadingFill.style.width = pct + '%';
-        loadingLabel.textContent =
-          `Loading anchor ${event.n} of ${event.total} — "${event.scene.displayName}"`;
+        loadingLabel.textContent = `loading base splat ${event.n}/${event.total}...`;
         break;
       }
 
       case 'loadDone': {
-        loadingEl.classList.remove('visible');
-        loadingFill.style.width = '100%';
-
-        // Show pointer-lock prompt
-        clickToStart.style.display = 'block';
-        backBtn.style.display = 'block';
-
-        sceneTitleEl.textContent = event.scene.displayName;
-        sceneTitleEl.style.display = 'block';
-
-        // Show explore button if segments already cached, else show loading state
-        if (library.hasSegments(event.scene)) {
-          exploreBtn.textContent = 'Loading segments…';
-          exploreBtn.classList.add('loading');
-          exploreBtn.style.display = 'block';
-        }
+        loadingFill.style.width = '48%';
+        loadingLabel.textContent = 'loading annotated desk segments...';
         break;
       }
 
       case 'segmentReady': {
-        const total   = event.totalExpected;
-        const loaded  = manager.segments.length;
-        exploreBtn.textContent = `Loading segments… (${loaded}/${total})`;
+        const total = event.totalExpected;
+        const loaded = manager.segments.length;
+        const pct = 48 + Math.round((loaded / total) * 52);
+        loadingFill.style.width = pct + '%';
+        loadingLabel.textContent = `loading annotated desk segments ${loaded}/${total}...`;
         break;
       }
 
       case 'allSegmentsReady': {
-        exploreBtn.textContent = `Explore segments (${event.segments.length}) ✦`;
-        exploreBtn.classList.remove('loading');
-        exploreBtn.style.display = 'block';
+        segmentsReady = true;
+        manager.showAllSegments();
+        loadingFill.style.width = '100%';
+        loadingEl.style.display = 'none';
+        terminalEl.style.display = 'block';
+        clickToStart.style.display = 'block';
         break;
       }
 
       case 'locked': {
         clickToStart.style.display = 'none';
-        hudEl.classList.add('visible');
         break;
       }
 
       case 'unlocked': {
-        if (!gameMode.isActive) {
-          clickToStart.style.display = 'block';
-        }
-        hudEl.classList.remove('visible');
+        if (segmentsReady) clickToStart.style.display = 'block';
         break;
       }
     }
   }
 
-  // ── Explore button ───────────────────────────────────────────────────────────
-  exploreBtn.addEventListener('click', () => {
-    if (manager.segments.length === 0) return;
-    exploreBtn.style.display = 'none';
-    document.exitPointerLock();
-    gameMode.activate(manager.segments);
-  });
+  function setTerminalScene(sceneName) {
+    terminalHeaderEl.innerHTML = `${renderPromptPrefix()} <span class="terminal-prefix">catalogue_raisonne --help</span>`;
+    terminalHelpEl.innerHTML = [
+      `${renderPromptLine()} An interactive spatial portrait of a lived workspace, reconstructed through Gaussian splatting.`,
+      `${renderPromptLine()} A field of objects-tools, fragments, residues-shifts as you move.`,
+      `${renderPromptLine()} wasd move | mouse look | scroll zoom | e/q vertical | shift faster | esc release cursor | click inspect note | space next object`
+    ].join('\n');
+    terminalOutputEl.innerHTML = '';
+  }
 
-  // ── Back button ───────────────────────────────────────────────────────────────
-  backBtn.addEventListener('click', () => {
-    document.exitPointerLock();
-    if (gameMode.isActive) gameMode.deactivate();
-    clickToStart.style.display = 'none';
-    hudEl.classList.remove('visible');
-    backBtn.style.display       = 'none';
-    sceneTitleEl.style.display  = 'none';
-    exploreBtn.style.display    = 'none';
-    pickerEl.style.display      = 'flex';
-  });
-
-  // ── SPACE key → game mode advance ────────────────────────────────────────────
-  document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && gameMode.isActive) {
-      e.preventDefault();
-      gameMode.onKeySpace();
+  function selectSegment(entry, { focus = false } = {}) {
+    currentSelection = entry;
+    if (focus) {
+      manager.focusSegment(entry.meta.clusterId);
     }
-  });
 
-  // ── Pointer lock from click-to-start ─────────────────────────────────────────
-  clickToStart.addEventListener('click', () => {
-    manager.requestPointerLock();
-  });
+    const body = hasAnnotation(entry.meta)
+      ? entry.meta.text.trim()
+      : 'no annotation is attached to this segment yet.';
+    renderTerminalAnnotation(entry.meta.clusterId, body);
+    setSelectionHalo(entry.meta);
+  }
+
+  function clearSelection() {
+    currentSelection = null;
+    selectionHalo.visible = false;
+    typewriterToken += 1;
+    terminalOutputEl.innerHTML = '';
+  }
+
+  function hasAnnotation(meta) {
+    const text = meta?.text?.trim();
+    return Boolean(text && text.toLowerCase() !== 'null');
+  }
+
+  function buildSelectionHalo() {
+    const geometry = new THREE.SphereGeometry(0.085, 24, 24);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x59a7ff,
+      transparent: true,
+      opacity: 0.24,
+      depthWrite: false,
+    });
+    const halo = new THREE.Mesh(geometry, material);
+    halo.visible = false;
+    return halo;
+  }
+
+  function setSelectionHalo(meta) {
+    const centroid = meta?.centroid;
+    if (!Array.isArray(centroid) || centroid.length !== 3) {
+      selectionHalo.visible = false;
+      return;
+    }
+
+    selectionHalo.position.set(centroid[0], -centroid[1], -centroid[2]);
+    const gaussianCount = meta.gaussianCount ?? 0;
+    const radius = Math.max(0.07, Math.min(0.2, 0.07 + gaussianCount / 350000));
+    selectionHalo.scale.setScalar(radius / 0.085);
+    selectionHalo.visible = true;
+  }
+
+  function renderTerminalAnnotation(clusterId, body) {
+    const prompt = `${renderPromptLine()}`;
+    const text = `${prompt}\n------- object ${clusterId} -----:\n${escapeHtml(body)}`;
+    typeTerminalHtml(text);
+  }
+
+  function typeTerminalText(text) {
+    typeTerminalHtml(escapeHtml(text));
+  }
+
+  function typeTerminalHtml(html) {
+    const token = ++typewriterToken;
+    terminalOutputEl.innerHTML = '';
+
+    const chars = [...html];
+    let index = 0;
+
+    function step() {
+      if (token !== typewriterToken) return;
+      terminalOutputEl.innerHTML = chars.slice(0, index).join('');
+      if (index < chars.length) {
+        index += 1;
+        window.setTimeout(step, index < 32 ? 10 : 6);
+      }
+    }
+
+    step();
+  }
+
+  function getNextSegmentEntry() {
+    const segments = manager.segments.filter(({ meta }) => hasAnnotation(meta));
+    if (segments.length === 0) return null;
+
+    if (!currentSelection) {
+      return segments[0];
+    }
+
+    const currentIndex = segments.findIndex(entry => entry.meta.clusterId === currentSelection.meta.clusterId);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % segments.length : 0;
+    return segments[nextIndex];
+  }
+
+  function getConfiguredAssetBaseUrl() {
+    const configured = window.ASSET_BASE_URL
+      ?? new URLSearchParams(window.location.search).get('assets')
+      ?? getDefaultAssetBaseUrl();
+    return configured.endsWith('/') ? configured : `${configured}/`;
+  }
+
+  function getDefaultAssetBaseUrl() {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return './assets/';
+    }
+    if (hostname === 'anonymous-room.pages.dev') {
+      return 'https://assets.loriechen.com/';
+    }
+    return './assets/';
+  }
+
+  function renderPromptPrefix() {
+    return '<span class="terminal-prompt">lorie@catalogue_raisonne: ~/' + escapeHtml(scenePathName) + '/$</span>';
+  }
+
+  function renderPromptLine() {
+    return `${renderPromptPrefix()} <span class="terminal-prefix"></span>`;
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
 </script>
 
 </body>

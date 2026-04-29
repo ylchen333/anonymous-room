@@ -2,7 +2,7 @@
 /**
  * generate-manifest.js
  *
- * Scans the assets/ directory and auto-generates assets/manifest.json.
+ * Scans the assets/ directory and auto-generates assets/[scene]_manifest.json.
  *
  * Detection rules:
  *   [scene]_N.ext        → groups into an "on_the_fly_nvs" scene (N is integer >= 0)
@@ -13,7 +13,7 @@
  *
  * Usage:
  *   node scripts/generate-manifest.js
- *   node scripts/generate-manifest.js --assets-dir ./assets --out ./assets/manifest.json
+ *   node scripts/generate-manifest.js --assets-dir ./assets --out ./assets/desk_longer_manifest.json
  *   node scripts/generate-manifest.js --dry-run
  */
 
@@ -34,7 +34,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const ASSETS_DIR = path.resolve(flags.assetsDir ?? path.join(__dirname, '..', 'assets'));
-const OUT_PATH   = path.resolve(flags.out ?? path.join(ASSETS_DIR, 'manifest.json'));
+const OUT_PATH   = path.resolve(flags.out ?? path.join(ASSETS_DIR, 'scene_manifest.json'));
 
 // ── Scan ──────────────────────────────────────────────────────────────────────
 
