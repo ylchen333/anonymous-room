@@ -391,19 +391,8 @@ click to inspect note</div>
   function getConfiguredAssetBaseUrl() {
     const configured = window.ASSET_BASE_URL
       ?? new URLSearchParams(window.location.search).get('assets')
-      ?? getDefaultAssetBaseUrl();
+      ?? 'https://assets.loriechen.com/';
     return configured.endsWith('/') ? configured : `${configured}/`;
-  }
-
-  function getDefaultAssetBaseUrl() {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return './assets/';
-    }
-    if (hostname === 'anonymous-room.pages.dev') {
-      return 'https://assets.loriechen.com/';
-    }
-    return './assets/';
   }
 
   function renderPromptPrefix() {
