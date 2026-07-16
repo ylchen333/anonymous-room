@@ -93,7 +93,7 @@
       border: 1px solid var(--panel-border);
       backdrop-filter: blur(10px);
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
-      pointer-events: none;
+      pointer-events: auto;
       font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
       font-size: 13px;
       line-height: 1.55;
@@ -115,6 +115,43 @@
 
     .terminal-prompt {
       color: var(--prompt);
+    }
+
+    #terminal-command {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    #terminal-input {
+      width: 100%;
+      min-width: 150px;
+      border: 0;
+      outline: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+    }
+
+    #terminal-input::placeholder {
+      color: var(--muted);
+    }
+
+    #highlight-status {
+      display: none;
+      position: fixed;
+      right: 22px;
+      top: 22px;
+      z-index: 180;
+      padding: 10px 12px;
+      background: rgba(10, 18, 24, 0.78);
+      border: 1px solid rgba(125, 216, 255, 0.42);
+      color: #aee9ff;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      pointer-events: none;
     }
 
     @media (max-width: 640px) {
@@ -144,13 +181,19 @@ click to inspect note</div>
   <div id="terminal-header"></div>
   <div id="terminal-help"></div>
   <div id="terminal-output"></div>
+  <form id="terminal-command" autocomplete="off">
+    <span class="terminal-prompt">$</span>
+    <input id="terminal-input" spellcheck="false" placeholder="comments --view_comments" />
+  </form>
 </div>
+
+<div id="highlight-status">highlight mode</div>
 
 <script type="importmap">
 {
   "imports": {
-    "three":             "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.178.0/three.module.js",
-    "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js"
+    "three":             "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.179.0/three.module.js",
+    "@sparkjsdev/spark": "./node_modules/@sparkjsdev/spark/dist/spark.module.js"
   }
 }
 </script>
@@ -160,9 +203,14 @@ click to inspect note</div>
   import { AssetLibrary } from './src/assetLibrary.js';
   import { SceneManager } from './src/sceneManager.js';
 
-  const TARGET_SCENE_ID = 'desk_longer';
+  const DEFAULT_SCENE_ID = 'SFCI_Take3_RC';
+  const params = new URLSearchParams(window.location.search);
+  const TARGET_SCENE_ID = params.get('scene') ?? DEFAULT_SCENE_ID;
   const ASSET_BASE_URL = getConfiguredAssetBaseUrl();
   const MANIFEST_URL = `${ASSET_BASE_URL}${TARGET_SCENE_ID}_manifest.json`;
+  const COMMENT_STORAGE_KEY = `catalogue_comments:${TARGET_SCENE_ID}`;
+  const PROFILE_STORAGE_KEY = 'catalogue_profile';
+  const HIGHLIGHT_KEY = 'KeyH';
 
   const loadingEl = document.getElementById('loading-overlay');
   const loadingLabel = document.getElementById('loading-label');
@@ -172,11 +220,14 @@ click to inspect note</div>
   const terminalHeaderEl = document.getElementById('terminal-header');
   const terminalHelpEl = document.getElementById('terminal-help');
   const terminalOutputEl = document.getElementById('terminal-output');
+  const terminalCommandEl = document.getElementById('terminal-command');
+  const terminalInputEl = document.getElementById('terminal-input');
+  const highlightStatusEl = document.getElementById('highlight-status');
 
   const library = new AssetLibrary(MANIFEST_URL, ASSET_BASE_URL);
   await library.load();
-
   const scene = library.getById(TARGET_SCENE_ID) ?? library.getAll().find(entry => library.hasSegments(entry));
+
   if (!scene) {
     throw new Error('No annotated scene was found in the manifest.');
   }
@@ -185,10 +236,27 @@ click to inspect note</div>
   const scenePromptName = scene.id.split('_')[0] || scene.id || 'scene';
   const scenePathName = scene.room || scenePromptName;
   const selectionHalo = buildSelectionHalo();
+  const selectionAnchor = buildSelectionAnchor();
+  const brushGroup = new THREE.Group();
+  const brushMaterial = new THREE.MeshBasicMaterial({
+    color: 0x82d8ff,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+  });
   manager.scene.add(selectionHalo);
+  manager.scene.add(selectionAnchor);
+  manager.scene.add(brushGroup);
 
   let segmentsReady = false;
   let currentSelection = null;
+  let highlightMode = false;
+  let isBrushDown = false;
+  let activeBrushPoints = [];
+  let activeBrushSegments = [];
+  let activeBrushCentroid = null;
+  let profile = loadProfile();
+  let comments = loadComments();
   let typewriterToken = 0;
   setTerminalScene(scenePromptName);
 
@@ -199,7 +267,7 @@ click to inspect note</div>
   });
 
   manager.canvas.addEventListener('click', event => {
-    if (!segmentsReady) return;
+    if (!segmentsReady || highlightMode) return;
 
     const rect = manager.canvas.getBoundingClientRect();
     const clientX = document.pointerLockElement === manager.canvas
@@ -218,7 +286,43 @@ click to inspect note</div>
     selectSegment(entry, { focus: false });
   });
 
+  manager.canvas.addEventListener('pointerdown', event => {
+    if (!highlightMode || event.button !== 0) return;
+    isBrushDown = true;
+    addBrushPoint(event);
+  });
+
+  manager.canvas.addEventListener('pointermove', event => {
+    if (!highlightMode || !isBrushDown) return;
+    addBrushPoint(event);
+  });
+
+  document.addEventListener('pointerup', () => {
+    if (!highlightMode) return;
+    isBrushDown = false;
+    updateBrushCentroid();
+  });
+
+  terminalCommandEl.addEventListener('submit', event => {
+    event.preventDefault();
+    const command = terminalInputEl.value.trim();
+    terminalInputEl.value = '';
+    if (command) runTerminalCommand(command);
+  });
+
+  terminalInputEl.addEventListener('keydown', event => {
+    event.stopPropagation();
+  });
+
   document.addEventListener('keydown', event => {
+    if (event.target === terminalInputEl) return;
+    if (event.code === HIGHLIGHT_KEY) {
+      event.preventDefault();
+      event.stopPropagation();
+      setHighlightMode(!highlightMode);
+      return;
+    }
+
     if (event.code !== 'Space' || !segmentsReady) return;
     event.preventDefault();
     event.stopPropagation();
@@ -249,7 +353,7 @@ click to inspect note</div>
 
       case 'loadDone': {
         loadingFill.style.width = '48%';
-        loadingLabel.textContent = 'loading annotated desk segments...';
+        loadingLabel.textContent = 'loading annotated segments...';
         break;
       }
 
@@ -258,7 +362,7 @@ click to inspect note</div>
         const loaded = manager.segments.length;
         const pct = 48 + Math.round((loaded / total) * 52);
         loadingFill.style.width = pct + '%';
-        loadingLabel.textContent = `loading annotated desk segments ${loaded}/${total}...`;
+        loadingLabel.textContent = `loading annotated segments ${loaded}/${total}...`;
         break;
       }
 
@@ -287,9 +391,10 @@ click to inspect note</div>
   function setTerminalScene(sceneName) {
     terminalHeaderEl.innerHTML = `${renderPromptPrefix()} <span class="terminal-prefix">catalogue_raisonne --help</span>`;
     terminalHelpEl.innerHTML = [
-      `${renderPromptLine()} An interactive spatial portrait of a lived workspace, reconstructed through Gaussian splatting.`,
-      `${renderPromptLine()} A field of objects-tools, fragments, residues-shifts as you move.`,
-      `${renderPromptLine()} wasd move | mouse look | scroll zoom | e/q vertical | shift faster | esc release cursor | click inspect note | space next object`
+      `${renderPromptLine()} An interactive spatial portrait of a lived workspace at Carnegie Mellon University (the Studio For Creative Inquiry), reconstructed through Gaussian splatting.`,
+      // `${renderPromptLine()} A field of objects-tools, fragments, residues-shifts as you move.`,
+      `${renderPromptLine()} wasd move | mouse look | scroll zoom | e/q vertical | shift faster | esc release cursor`,
+      `${renderPromptLine()} click inspect segment | space next object | h nearest-region highlight | comments --view_comments | comments --write_comment message | comments --clear_highlight | user yourname`
     ].join('\n');
     terminalOutputEl.innerHTML = '';
   }
@@ -300,16 +405,16 @@ click to inspect note</div>
       manager.focusSegment(entry.meta.clusterId);
     }
 
-    const body = hasAnnotation(entry.meta)
-      ? entry.meta.text.trim()
-      : 'no annotation is attached to this segment yet.';
-    renderTerminalAnnotation(entry.meta.clusterId, body);
+    renderSegmentPanel(entry);
     setSelectionHalo(entry.meta);
+    manager.highlightSegment(entry.meta.clusterId);
   }
 
   function clearSelection() {
     currentSelection = null;
     selectionHalo.visible = false;
+    selectionAnchor.visible = false;
+    manager.clearSegmentHighlight();
     typewriterToken += 1;
     terminalOutputEl.innerHTML = '';
   }
@@ -340,16 +445,183 @@ click to inspect note</div>
     }
 
     selectionHalo.position.set(centroid[0], -centroid[1], -centroid[2]);
+    selectionAnchor.position.copy(selectionHalo.position);
     const gaussianCount = meta.gaussianCount ?? 0;
     const radius = Math.max(0.07, Math.min(0.2, 0.07 + gaussianCount / 350000));
     selectionHalo.scale.setScalar(radius / 0.085);
     selectionHalo.visible = true;
+    selectionAnchor.visible = true;
+  }
+
+  function buildSelectionAnchor() {
+    const geometry = new THREE.SphereGeometry(0.035, 18, 18);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x82d8ff,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+    });
+    const anchor = new THREE.Mesh(geometry, material);
+    anchor.visible = false;
+    return anchor;
+  }
+
+  function renderSegmentPanel(entry) {
+    const body = hasAnnotation(entry.meta)
+      ? entry.meta.text.trim()
+      : 'no annotation is attached to this segment yet.';
+    const scoped = getCommentsForScope(getCurrentScope());
+    const commentsText = scoped.length
+      ? scoped.map(formatCommentLine).join('\n')
+      : 'no comments for this scope.';
+    const target = getScopeLabel(getCurrentScope());
+    const text = [
+      `${renderPromptLine()}`,
+      `------- object ${entry.meta.clusterId} -----:`,
+      escapeHtml(body),
+      '',
+      `comments for ${escapeHtml(target)}:`,
+      escapeHtml(commentsText),
+    ].join('\n');
+    typeTerminalHtml(text);
   }
 
   function renderTerminalAnnotation(clusterId, body) {
     const prompt = `${renderPromptLine()}`;
     const text = `${prompt}\n------- object ${clusterId} -----:\n${escapeHtml(body)}`;
     typeTerminalHtml(text);
+  }
+
+  function runTerminalCommand(command) {
+    if (command === 'help' || command === '--help') {
+      setTerminalScene(scenePromptName);
+      return;
+    }
+
+    if (command === 'anonymous') {
+      setUsername('');
+      typeTerminalText('identity set to anonymous.');
+      return;
+    }
+
+    if (command.startsWith('user ')) {
+      setUsername(command.slice(5).trim());
+      typeTerminalText(`identity set to ${profile.username || 'anonymous'}.`);
+      return;
+    }
+
+    if (command.startsWith('comments ')) {
+      handleCommentCommand(command);
+      return;
+    }
+
+    typeTerminalText(`unknown command: ${command}\ntry: user yourname | anonymous | comments --view_comments | comments --write_comment message`);
+  }
+
+  function handleCommentCommand(command) {
+    if (command.includes('--clear_highlight')) {
+      clearHighlightBrush();
+      typeTerminalText('cleared active highlight brush. comments now target the selected segment or full splat.');
+      return;
+    }
+
+    if (command.includes('--view_comments')) {
+      renderScopedComments();
+      return;
+    }
+
+    const writeIndex = command.indexOf('--write_comment');
+    if (writeIndex >= 0) {
+      const message = command.slice(writeIndex + '--write_comment'.length).trim();
+      if (!message) {
+        typeTerminalText('missing comment text. example: comments --write_comment this area feels layered');
+        return;
+      }
+      writeComment(message);
+      return;
+    }
+
+    typeTerminalText('comment command requires --view_comments or --write_comment message');
+  }
+
+  function writeComment(message) {
+    const scope = getCurrentScope();
+    const highlight = scope.type === 'highlight' ? serializeActiveHighlight() : null;
+    const comment = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      author: profile.username || 'anonymous',
+      message,
+      scope,
+      highlight,
+      createdAt: new Date().toISOString(),
+    };
+    comments.push(comment);
+    saveComments();
+    typeTerminalText(`saved comment on ${getScopeLabel(scope)} as ${comment.author}.\n\n${formatCommentLine(comment)}`);
+  }
+
+  function renderScopedComments() {
+    const scope = getCurrentScope();
+    const scoped = getCommentsForScope(scope);
+    const lines = scoped.length ? scoped.map(formatCommentLine).join('\n') : 'no comments for this scope.';
+    typeTerminalText(`comments for ${getScopeLabel(scope)}:\n${lines}`);
+  }
+
+  function getCurrentScope() {
+    if (activeBrushPoints.length > 0) {
+      return {
+        type: 'highlight',
+        id: activeBrushCentroid ? formatPointId(activeBrushCentroid) : `highlight-${activeBrushPoints.length}`,
+      };
+    }
+
+    if (currentSelection?.meta) {
+      return { type: 'segment', id: String(currentSelection.meta.clusterId) };
+    }
+
+    return { type: 'scene', id: scene.id };
+  }
+
+  function getCommentsForScope(scope) {
+    return comments.filter(comment => comment.scope?.type === scope.type && comment.scope?.id === scope.id);
+  }
+
+  function getScopeLabel(scope) {
+    if (scope.type === 'segment') return `segment ${scope.id}`;
+    if (scope.type === 'highlight') return `highlight ${scope.id}`;
+    return 'full splat';
+  }
+
+  function formatCommentLine(comment) {
+    const date = new Date(comment.createdAt);
+    const stamp = Number.isNaN(date.getTime()) ? 'unknown time' : date.toLocaleString();
+    return `[${stamp}] ${comment.author}: ${comment.message}`;
+  }
+
+  function setUsername(username) {
+    profile = { username: username.trim() };
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+  }
+
+  function loadProfile() {
+    try {
+      return JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY)) ?? { username: '' };
+    } catch {
+      return { username: '' };
+    }
+  }
+
+  function loadComments() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(COMMENT_STORAGE_KEY));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveComments() {
+    localStorage.setItem(COMMENT_STORAGE_KEY, JSON.stringify(comments));
   }
 
   function typeTerminalText(text) {
@@ -386,6 +658,78 @@ click to inspect note</div>
     const currentIndex = segments.findIndex(entry => entry.meta.clusterId === currentSelection.meta.clusterId);
     const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % segments.length : 0;
     return segments[nextIndex];
+  }
+
+  function setHighlightMode(enabled) {
+    highlightMode = enabled;
+    manager.setNavigationPaused(enabled);
+    highlightStatusEl.style.display = enabled ? 'block' : 'none';
+    manager.canvas.style.cursor = enabled ? 'crosshair' : '';
+    if (enabled && document.pointerLockElement === manager.canvas) {
+      document.exitPointerLock();
+    }
+    typeTerminalText(enabled
+      ? 'highlight mode enabled. drag to sample the loaded region nearest your camera, then use comments --write_comment message.'
+      : 'highlight mode disabled.');
+  }
+
+  function clearHighlightBrush() {
+    activeBrushPoints = [];
+    activeBrushSegments = [];
+    activeBrushCentroid = null;
+    brushGroup.clear();
+  }
+
+  function addBrushPoint(event) {
+    const sample = getBrushSample();
+    if (!sample) return;
+
+    const last = activeBrushPoints.at(-1);
+    if (last && last.distanceTo(sample.point) < 0.05) return;
+
+    activeBrushPoints.push(sample.point);
+    if (!activeBrushSegments.includes(sample.clusterId)) {
+      activeBrushSegments.push(sample.clusterId);
+    }
+    const marker = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 12), brushMaterial);
+    marker.position.copy(sample.point);
+    marker.name = 'comment-highlight-point';
+    brushGroup.add(marker);
+    manager.highlightSegment(sample.clusterId);
+    updateBrushCentroid();
+  }
+
+  function getBrushSample() {
+    const entry = manager.findClosestSegmentToCamera();
+    const centroid = entry?.meta?.centroid;
+    if (!entry || !Array.isArray(centroid) || centroid.length !== 3) return null;
+
+    return {
+      clusterId: entry.meta.clusterId,
+      point: new THREE.Vector3(centroid[0], -centroid[1], -centroid[2]),
+    };
+  }
+
+  function updateBrushCentroid() {
+    if (activeBrushPoints.length === 0) {
+      activeBrushCentroid = null;
+      return;
+    }
+    activeBrushCentroid = activeBrushPoints
+      .reduce((sum, point) => sum.add(point), new THREE.Vector3())
+      .multiplyScalar(1 / activeBrushPoints.length);
+  }
+
+  function serializeActiveHighlight() {
+    return {
+      centroid: activeBrushCentroid ? activeBrushCentroid.toArray() : null,
+      points: activeBrushPoints.map(point => point.toArray()),
+      segments: [...activeBrushSegments],
+    };
+  }
+
+  function formatPointId(point) {
+    return point.toArray().map(value => value.toFixed(2)).join(',');
   }
 
   function getConfiguredAssetBaseUrl() {

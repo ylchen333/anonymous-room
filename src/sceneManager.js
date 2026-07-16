@@ -14,6 +14,7 @@
  */
 
 import * as THREE from 'three';
+import { SparkRenderer } from '@sparkjsdev/spark';
 import { loadScene, prefetchSegments, disposeSplatGroup } from './splatLoader.js';
 
 const MOVE_SPEED        = 2.0;
@@ -43,10 +44,18 @@ export class SceneManager {
     // (PLY world pos flipped: y→-y, z→-z due to 180° X rotation on SplatMesh)
     this.camera.position.set(0.1, -0.1, 0.0);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, canvas: canvas ?? undefined });
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, canvas: canvas ?? undefined });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     if (!canvas) document.body.appendChild(this.renderer.domElement);
+
+    this.spark = new SparkRenderer({ renderer: this.renderer });
+    this.spark.enableLod = true;
+    this.spark.lodSplatScale = 3.0;
+    this.spark.lodSplatCount = 4_000_000;
+    this.spark.outsideFoveate = 1.0;
+    this.spark.behindFoveate = 1.0;
+    this.scene.add(this.spark);
 
     // First-person controls state
     this._euler    = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -54,6 +63,7 @@ export class SceneManager {
     this._direction = new THREE.Vector3();
     this._keys     = {};
     this._isLocked = false;
+    this._navigationPaused = false;
 
     // Active scene bookkeeping
     /** @type {import('./splatLoader.js').LoadedScene | null} */
@@ -77,6 +87,8 @@ export class SceneManager {
     this._prefetchHandle?.cancel();
     this._prefetchHandle = null;
     this._segments = [];
+    this._segmentsCompleteDispatched = false;
+    this._clearSegmentHighlights();
 
     // Dispose previous
     if (this._loaded) {
@@ -103,11 +115,16 @@ export class SceneManager {
           this._segments.push(entry);
           loaded.segmentMeshes.push(entry.mesh);
           this.onEvent({ type: 'segmentReady', entry, totalExpected: sceneConfig.segments.length });
-          if (this._segments.length === sceneConfig.segments.length) {
-            this.onEvent({ type: 'allSegmentsReady', segments: this._segments });
-          }
         }
       );
+      this._prefetchHandle.promise.finally(() => {
+        if (this._segmentsCompleteDispatched) return;
+        this._segmentsCompleteDispatched = true;
+        this.onEvent({ type: 'allSegmentsReady', segments: this._segments });
+      });
+    } else {
+      this._segmentsCompleteDispatched = true;
+      this.onEvent({ type: 'allSegmentsReady', segments: this._segments });
     }
   }
 
@@ -118,11 +135,25 @@ export class SceneManager {
     for (const s of this._segments) s.mesh.visible = true;
   }
 
-  /** Keep every segment visible and hide the original anchor splats. */
+  /** Keep the full anchor splat visible; segment meshes are overlays on demand. */
   showAllSegments() {
     if (!this._loaded) return;
-    for (const m of this._loaded.anchorMeshes) m.visible = false;
-    for (const s of this._segments) s.mesh.visible = true;
+    for (const m of this._loaded.anchorMeshes) m.visible = true;
+    for (const s of this._segments) s.mesh.visible = false;
+  }
+
+  highlightSegment(clusterId) {
+    this._clearSegmentHighlights();
+    const entry = this.findSegmentByClusterId(clusterId);
+    if (!entry) return;
+
+    entry.mesh.visible = true;
+    if ('recolor' in entry.mesh) entry.mesh.recolor.set(0x82d8ff);
+    if ('opacity' in entry.mesh) entry.mesh.opacity = 1;
+  }
+
+  clearSegmentHighlight() {
+    this._clearSegmentHighlights();
   }
 
   /** Show only a specific segment by clusterId; hide all others. */
@@ -172,6 +203,27 @@ export class SceneManager {
     return this._segments.find(({ meta }) => predicate(meta)) ?? null;
   }
 
+  findClosestSegmentToCamera(predicate = () => true) {
+    let best = null;
+    let bestDistance = Infinity;
+
+    for (const entry of this._segments) {
+      if (!predicate(entry.meta)) continue;
+
+      const centroid = entry.meta?.centroid;
+      if (!Array.isArray(centroid) || centroid.length !== 3) continue;
+
+      const worldPoint = new THREE.Vector3(centroid[0], -centroid[1], -centroid[2]);
+      const distance = worldPoint.distanceTo(this.camera.position);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = entry;
+      }
+    }
+
+    return best;
+  }
+
   pickSegmentFromScreenPoint(clientX, clientY, predicate = () => true) {
     if (this._segments.length === 0) return null;
 
@@ -214,6 +266,16 @@ export class SceneManager {
     this._keys[code] = pressed;
   }
 
+  setNavigationPaused(paused) {
+    this._navigationPaused = paused;
+    if (paused) {
+      this._velocity.set(0, 0, 0);
+      for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'ShiftLeft', 'ShiftRight']) {
+        this._keys[code] = false;
+      }
+    }
+  }
+
   // ── Events & animation loop ──────────────────────────────────────────────────
 
   _bindEvents() {
@@ -223,7 +285,7 @@ export class SceneManager {
     });
 
     document.addEventListener('mousemove', e => {
-      if (!this._isLocked) return;
+      if (!this._isLocked || this._navigationPaused) return;
       this._euler.setFromQuaternion(this.camera.quaternion);
       this._euler.y -= e.movementX * MOUSE_SENSITIVITY;
       this._euler.x -= e.movementY * MOUSE_SENSITIVITY;
@@ -232,6 +294,7 @@ export class SceneManager {
     });
 
     document.addEventListener('wheel', e => {
+      if (this._navigationPaused) return;
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
       this.camera.position.addScaledVector(fwd, -e.deltaY * 0.005 * SCROLL_SPEED);
     });
@@ -257,7 +320,7 @@ export class SceneManager {
 
   _tick(delta) {
     this._blendAnchors();
-    if (!this._isLocked) return;
+    if (!this._isLocked || this._navigationPaused) return;
 
     const speed = (this._keys['ShiftLeft'] || this._keys['ShiftRight'])
       ? MOVE_SPEED * FAST_MULTIPLIER
@@ -348,6 +411,14 @@ export class SceneManager {
     for (let i = 0; i < meshes.length; i++) {
       meshes[i].visible = weights[i] > 0;
       if (meshes[i].visible) meshes[i].opacity = weights[i];
+    }
+  }
+
+  _clearSegmentHighlights() {
+    for (const entry of this._segments) {
+      if ('recolor' in entry.mesh) entry.mesh.recolor.set(0xffffff);
+      if ('opacity' in entry.mesh) entry.mesh.opacity = 1;
+      entry.mesh.visible = false;
     }
   }
 }

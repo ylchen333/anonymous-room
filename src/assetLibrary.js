@@ -103,18 +103,33 @@ export class AssetLibrary {
    * @returns {{ url: string, meta: ManifestSegment }[]}
    */
   segmentEntries(scene) {
-    return [...scene.segments]
+    return [...(scene.segments ?? [])]
       .sort((a, b) => a.clusterId - b.clusterId)
-      .map(seg => ({ url: this.resolveUrl(seg.file), meta: seg }));
+      .map(seg => ({ url: this.resolveUrl(this.normalizeSegmentPath(scene, seg)), meta: seg }));
   }
 
   /** True if this scene has fully-loaded segmented splats ready. */
   hasSegments(scene) {
-    return scene.segments.length > 0;
+    return (scene.segments ?? []).length > 0;
   }
 
   _assertLoaded() {
     if (!this._loaded) throw new Error('AssetLibrary not loaded — call await library.load() first');
+  }
+
+  normalizeSegmentPath(scene, segment) {
+    if (
+      scene.id === 'SFCI_Take3_RC' &&
+      typeof segment.file === 'string' &&
+      segment.file.startsWith('SFCI_Take3_RC_segments/segments/')
+    ) {
+      return segment.file.replace(
+        'SFCI_Take3_RC_segments/segments/',
+        'segments/SFCI_Take3_RC/'
+      );
+    }
+
+    return segment.file;
   }
 }
 

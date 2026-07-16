@@ -22,6 +22,11 @@
 import * as THREE from 'three';
 import { SplatMesh } from '@sparkjsdev/spark';
 
+const LOD_SPLAT_OPTIONS = {
+  lod: true,
+  nonLod: 'wait',
+};
+
 // ── loadScene ─────────────────────────────────────────────────────────────────
 
 /**
@@ -51,8 +56,9 @@ export async function loadScene(scene, library, opts = {}) {
 
   const meshes = [];
   for (let i = 0; i < urls.length; i++) {
-    const mesh = new SplatMesh({ url: urls[i] });
+    const mesh = new SplatMesh({ url: urls[i], ...LOD_SPLAT_OPTIONS });
     await mesh.initialized;
+    preferFullQuality(mesh);
 
     // 180° X-axis rotation: converts PLY coordinate convention (Y-down, Z-into-screen)
     // to Three.js convention (Y-up). Matches what sparkjs.dev/viewer/ applies after load.
@@ -99,16 +105,21 @@ export function prefetchSegments(scene, library, parentGroup, onSegmentReady) {
     for (const { url, meta } of entries) {
       if (cancelled) break;
 
-      const mesh = new SplatMesh({ url });
-      await mesh.initialized;
-      if (cancelled) { disposeMesh(mesh); break; }
+      try {
+        const mesh = new SplatMesh({ url, ...LOD_SPLAT_OPTIONS });
+        await mesh.initialized;
+        preferFullQuality(mesh);
+        if (cancelled) { disposeMesh(mesh); break; }
 
-      mesh.quaternion.set(1, 0, 0, 0);
-      mesh.visible = false;
-      mesh.name = `segment:${scene.id}:${meta.clusterId}`;
-      parentGroup.add(mesh);
+        mesh.quaternion.set(1, 0, 0, 0);
+        mesh.visible = false;
+        mesh.name = `segment:${scene.id}:${meta.clusterId}`;
+        parentGroup.add(mesh);
 
-      onSegmentReady({ mesh, meta });
+        onSegmentReady({ mesh, meta });
+      } catch (error) {
+        console.warn(`Skipping segment ${meta.clusterId}; failed to load ${url}`, error);
+      }
     }
   })();
 
@@ -135,6 +146,12 @@ function disposeMesh(obj) {
     obj.geometry?.dispose();
     if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
     else obj.material?.dispose();
+  }
+}
+
+function preferFullQuality(mesh) {
+  if ('enableLod' in mesh) {
+    mesh.enableLod = false;
   }
 }
 
