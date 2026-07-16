@@ -30,9 +30,10 @@ export class AssetLibrary {
    * @param {string} manifestUrl  URL of assets/[scene]_manifest.json (relative or absolute)
    * @param {string} assetsBase   Base URL prepended to all asset paths in manifest
    */
-  constructor(manifestUrl = './assets/scene_manifest.json', assetsBase = './assets/') {
+  constructor(manifestUrl = './assets/scene_manifest.json', assetsBase = './assets/', assetVersion = '') {
     this.manifestUrl = manifestUrl;
     this.assetsBase  = assetsBase;
+    this.assetVersion = assetVersion;
     /** @type {ManifestScene[]} */
     this.scenes = [];
     this._loaded = false;
@@ -85,7 +86,7 @@ export class AssetLibrary {
    * @returns {string}
    */
   resolveUrl(relPath) {
-    return this.assetsBase + relPath;
+    return appendVersion(this.assetsBase + relPath, this.assetVersion);
   }
 
   /**
@@ -131,6 +132,11 @@ export class AssetLibrary {
 
     return segment.file;
   }
+}
+
+function appendVersion(url, version) {
+  if (!version) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(version);
 }
 
 // ── Type declarations (JSDoc-only, no TypeScript) ─────────────────────────────

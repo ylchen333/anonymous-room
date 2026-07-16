@@ -204,10 +204,11 @@ click to inspect note</div>
   import { SceneManager } from './src/sceneManager.js';
 
   const DEFAULT_SCENE_ID = 'SFCI_Take3_RC';
+  const ASSET_VERSION = '20260716-cors-1';
   const params = new URLSearchParams(window.location.search);
   const TARGET_SCENE_ID = params.get('scene') ?? DEFAULT_SCENE_ID;
   const ASSET_BASE_URL = getConfiguredAssetBaseUrl();
-  const MANIFEST_URL = `${ASSET_BASE_URL}${TARGET_SCENE_ID}_manifest.json`;
+  const MANIFEST_URL = appendVersion(`${ASSET_BASE_URL}${TARGET_SCENE_ID}_manifest.json`, ASSET_VERSION);
   const COMMENT_STORAGE_KEY = `catalogue_comments:${TARGET_SCENE_ID}`;
   const PROFILE_STORAGE_KEY = 'catalogue_profile';
   const HIGHLIGHT_KEY = 'KeyH';
@@ -224,7 +225,7 @@ click to inspect note</div>
   const terminalInputEl = document.getElementById('terminal-input');
   const highlightStatusEl = document.getElementById('highlight-status');
 
-  const library = new AssetLibrary(MANIFEST_URL, ASSET_BASE_URL);
+  const library = new AssetLibrary(MANIFEST_URL, ASSET_BASE_URL, ASSET_VERSION);
   await library.load();
   const scene = library.getById(TARGET_SCENE_ID) ?? library.getAll().find(entry => library.hasSegments(entry));
 
@@ -737,6 +738,11 @@ click to inspect note</div>
       ?? new URLSearchParams(window.location.search).get('assets')
       ?? 'https://assets.loriechen.com/';
     return configured.endsWith('/') ? configured : `${configured}/`;
+  }
+
+  function appendVersion(url, version) {
+    if (!version) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(version);
   }
 
   function renderPromptPrefix() {
