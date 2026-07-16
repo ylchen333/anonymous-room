@@ -20,12 +20,13 @@
  */
 
 import * as THREE from 'three';
-import { SplatMesh } from '@sparkjsdev/spark';
+import { SplatMesh, dyno } from '@sparkjsdev/spark';
 
 const LOD_SPLAT_OPTIONS = {
   lod: true,
   nonLod: 'wait',
 };
+const REVEAL_DURATION_SECONDS = 7.5;
 
 // ── loadScene ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ export async function loadScene(scene, library, opts = {}) {
     const mesh = new SplatMesh({ url: urls[i], ...LOD_SPLAT_OPTIONS });
     await mesh.initialized;
     preferFullQuality(mesh);
+    applySpreadReveal(mesh);
 
     // 180° X-axis rotation: converts PLY coordinate convention (Y-down, Z-into-screen)
     // to Three.js convention (Y-up). Matches what sparkjs.dev/viewer/ applies after load.
@@ -153,6 +155,47 @@ function preferFullQuality(mesh) {
   if ('enableLod' in mesh) {
     mesh.enableLod = false;
   }
+}
+
+function applySpreadReveal(mesh) {
+  const revealT = dyno.dynoFloat(0);
+  mesh.userData.spreadReveal = {
+    time: 0,
+    duration: REVEAL_DURATION_SECONDS,
+    uniform: revealT,
+    done: false,
+  };
+
+  mesh.objectModifier = dyno.dynoBlock(
+    { gsplat: dyno.Gsplat },
+    { gsplat: dyno.Gsplat },
+    ({ gsplat }) => {
+      const spread = new dyno.Dyno({
+        inTypes: { gsplat: dyno.Gsplat, t: 'float' },
+        outTypes: { gsplat: dyno.Gsplat },
+        statements: ({ inputs, outputs }) => dyno.unindentLines(`
+          ${outputs.gsplat} = ${inputs.gsplat};
+          float t = ${inputs.t} * 2.4;
+          float tt = t * t * 0.4 + 0.5;
+          vec3 scales = ${inputs.gsplat}.scales;
+          vec3 localPos = ${inputs.gsplat}.center;
+          float l = length(localPos.xz);
+
+          localPos.xz *= min(1.0, 0.3 + max(0.0, tt * 0.05));
+          ${outputs.gsplat}.center = localPos;
+          ${outputs.gsplat}.scales = max(
+            mix(vec3(0.0), scales, min(tt - 7.0 - l * 2.5, 1.0)),
+            mix(vec3(0.0), scales * 0.2, min(tt - 1.0 - l * 2.0, 1.0))
+          );
+          ${outputs.gsplat}.rgba = mix(vec4(0.3), ${inputs.gsplat}.rgba, clamp(tt - l * 2.5 - 3.0, 0.0, 1.0));
+        `),
+      });
+
+      gsplat = spread.apply({ gsplat, t: revealT }).gsplat;
+      return { gsplat };
+    }
+  );
+  mesh.updateGenerator();
 }
 
 // ── Type declarations ─────────────────────────────────────────────────────────

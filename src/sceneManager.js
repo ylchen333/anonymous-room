@@ -320,6 +320,7 @@ export class SceneManager {
 
   _tick(delta) {
     this._blendAnchors();
+    this._updateRevealAnimations(delta);
     if (!this._isLocked || this._navigationPaused) return;
 
     const speed = (this._keys['ShiftLeft'] || this._keys['ShiftRight'])
@@ -419,6 +420,19 @@ export class SceneManager {
       if ('recolor' in entry.mesh) entry.mesh.recolor.set(0xffffff);
       if ('opacity' in entry.mesh) entry.mesh.opacity = 1;
       entry.mesh.visible = false;
+    }
+  }
+
+  _updateRevealAnimations(delta) {
+    for (const mesh of this._loaded?.anchorMeshes ?? []) {
+      const reveal = mesh.userData?.spreadReveal;
+      if (!reveal || reveal.done) continue;
+
+      reveal.time = Math.min(reveal.duration, reveal.time + delta);
+      reveal.uniform.value = reveal.time;
+      if (reveal.time >= reveal.duration) {
+        reveal.done = true;
+      }
     }
   }
 }

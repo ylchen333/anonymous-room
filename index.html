@@ -38,6 +38,17 @@
       color: white;
     }
 
+    #loading-overlay.is-compact {
+      inset: auto 22px 22px auto;
+      width: min(320px, calc(100vw - 44px));
+      padding: 14px 16px;
+      align-items: stretch;
+      background: rgba(10, 10, 10, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+    }
+
     #loading-label {
       font-size: 13px;
       color: #c8c8c8;
@@ -304,11 +315,11 @@ click to inspect note</div>
     updateBrushCentroid();
   });
 
-  terminalCommandEl.addEventListener('submit', event => {
+  terminalCommandEl.addEventListener('submit', async event => {
     event.preventDefault();
     const command = terminalInputEl.value.trim();
     terminalInputEl.value = '';
-    if (command) runTerminalCommand(command);
+    if (command) await runTerminalCommand(command);
   });
 
   terminalInputEl.addEventListener('keydown', event => {
@@ -354,7 +365,10 @@ click to inspect note</div>
 
       case 'loadDone': {
         loadingFill.style.width = '48%';
-        loadingLabel.textContent = 'loading annotated segments...';
+        loadingLabel.textContent = 'revealing splat; loading annotated segments...';
+        loadingEl.classList.add('is-compact');
+        terminalEl.style.display = 'block';
+        clickToStart.style.display = 'block';
         break;
       }
 
@@ -467,15 +481,16 @@ click to inspect note</div>
     return anchor;
   }
 
-  function renderSegmentPanel(entry) {
+  async function renderSegmentPanel(entry) {
     const body = hasAnnotation(entry.meta)
       ? entry.meta.text.trim()
       : 'no annotation is attached to this segment yet.';
-    const scoped = getCommentsForScope(getCurrentScope());
+    const scope = getCurrentScope();
+    const scoped = await getCommentsForScope(scope);
     const commentsText = scoped.length
       ? scoped.map(formatCommentLine).join('\n')
       : 'no comments for this scope.';
-    const target = getScopeLabel(getCurrentScope());
+    const target = getScopeLabel(scope);
     const text = [
       `${renderPromptLine()}`,
       `------- object ${entry.meta.clusterId} -----:`,
@@ -493,7 +508,7 @@ click to inspect note</div>
     typeTerminalHtml(text);
   }
 
-  function runTerminalCommand(command) {
+  async function runTerminalCommand(command) {
     if (command === 'help' || command === '--help') {
       setTerminalScene(scenePromptName);
       return;
@@ -512,14 +527,14 @@ click to inspect note</div>
     }
 
     if (command.startsWith('comments ')) {
-      handleCommentCommand(command);
+      await handleCommentCommand(command);
       return;
     }
 
     typeTerminalText(`unknown command: ${command}\ntry: user yourname | anonymous | comments --view_comments | comments --write_comment message`);
   }
 
-  function handleCommentCommand(command) {
+  async function handleCommentCommand(command) {
     if (command.includes('--clear_highlight')) {
       clearHighlightBrush();
       typeTerminalText('cleared active highlight brush. comments now target the selected segment or full splat.');
@@ -527,7 +542,7 @@ click to inspect note</div>
     }
 
     if (command.includes('--view_comments')) {
-      renderScopedComments();
+      await renderScopedComments();
       return;
     }
 
@@ -538,32 +553,32 @@ click to inspect note</div>
         typeTerminalText('missing comment text. example: comments --write_comment this area feels layered');
         return;
       }
-      writeComment(message);
+      await writeComment(message);
       return;
     }
 
     typeTerminalText('comment command requires --view_comments or --write_comment message');
   }
 
-  function writeComment(message) {
+  async function writeComment(message) {
     const scope = getCurrentScope();
     const highlight = scope.type === 'highlight' ? serializeActiveHighlight() : null;
-    const comment = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    const draft = {
+      scene: scene.id,
       author: profile.username || 'anonymous',
       message,
       scope,
       highlight,
-      createdAt: new Date().toISOString(),
     };
+    const comment = await saveCommentToBackend(draft);
     comments.push(comment);
-    saveComments();
+    saveLocalComments();
     typeTerminalText(`saved comment on ${getScopeLabel(scope)} as ${comment.author}.\n\n${formatCommentLine(comment)}`);
   }
 
-  function renderScopedComments() {
+  async function renderScopedComments() {
     const scope = getCurrentScope();
-    const scoped = getCommentsForScope(scope);
+    const scoped = await getCommentsForScope(scope);
     const lines = scoped.length ? scoped.map(formatCommentLine).join('\n') : 'no comments for this scope.';
     typeTerminalText(`comments for ${getScopeLabel(scope)}:\n${lines}`);
   }
@@ -583,7 +598,8 @@ click to inspect note</div>
     return { type: 'scene', id: scene.id };
   }
 
-  function getCommentsForScope(scope) {
+  async function getCommentsForScope(scope) {
+    await refreshCommentsFromBackend(scope);
     return comments.filter(comment => comment.scope?.type === scope.type && comment.scope?.id === scope.id);
   }
 
@@ -621,8 +637,70 @@ click to inspect note</div>
     }
   }
 
-  function saveComments() {
+  function saveLocalComments() {
     localStorage.setItem(COMMENT_STORAGE_KEY, JSON.stringify(comments));
+  }
+
+  async function refreshCommentsFromBackend(scope) {
+    try {
+      const response = await fetch(buildCommentsUrl(scope), {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`comments api returned ${response.status}`);
+      const data = await response.json();
+      if (Array.isArray(data.comments)) {
+        mergeComments(data.comments);
+        saveLocalComments();
+      }
+    } catch (error) {
+      console.warn('Using cached local comments; backend read failed.', error);
+    }
+  }
+
+  async function saveCommentToBackend(draft) {
+    try {
+      const response = await fetch('/api/comments', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(draft),
+      });
+      if (!response.ok) throw new Error(`comments api returned ${response.status}`);
+      const data = await response.json();
+      if (data.comment) return data.comment;
+    } catch (error) {
+      console.warn('Saving comment locally; backend write failed.', error);
+    }
+
+    return {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      scene: draft.scene,
+      author: draft.author,
+      message: draft.message,
+      scope: draft.scope,
+      highlight: draft.highlight,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  function buildCommentsUrl(scope) {
+    const url = new URL('/api/comments', window.location.origin);
+    url.searchParams.set('scene', scene.id);
+    url.searchParams.set('scope_type', scope.type);
+    url.searchParams.set('scope_id', scope.id);
+    return url;
+  }
+
+  function mergeComments(incoming) {
+    const byId = new Map(comments.map(comment => [comment.id, comment]));
+    for (const comment of incoming) {
+      if (comment?.id) byId.set(comment.id, comment);
+    }
+    comments = [...byId.values()].sort((a, b) => {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
   }
 
   function typeTerminalText(text) {
