@@ -8,7 +8,25 @@ const jsonHeaders = {
   'Cache-Control': 'no-store',
 };
 
-export async function onRequestGet({ request, env }) {
+export async function onRequestGet(context) {
+  try {
+    return await handleGet(context);
+  } catch (error) {
+    console.error('comments GET failed', error);
+    return json({ error: `Database error: ${error.message}` }, 500);
+  }
+}
+
+export async function onRequestPost(context) {
+  try {
+    return await handlePost(context);
+  } catch (error) {
+    console.error('comments POST failed', error);
+    return json({ error: `Database error: ${error.message}` }, 500);
+  }
+}
+
+async function handleGet({ request, env }) {
   const db = getDb(env);
   if (!db) return json({ error: 'D1 binding DB is not configured.' }, 500);
 
@@ -17,18 +35,26 @@ export async function onRequestGet({ request, env }) {
   const scopeType = cleanString(url.searchParams.get('scope_type'), 32);
   const scopeId = cleanString(url.searchParams.get('scope_id'), MAX_SCOPE_ID_LENGTH);
 
-  if (!scene || !VALID_SCOPE_TYPES.has(scopeType) || !scopeId) {
-    return json({ error: 'scene, scope_type, and scope_id are required.' }, 400);
+  if (!scene) {
+    return json({ error: 'scene is required.' }, 400);
   }
 
-  const { results } = await db.prepare(`
-    SELECT id, scene, scope_type AS scopeType, scope_id AS scopeId, author, message,
-           highlight_json AS highlightJson, created_at AS createdAt
-    FROM comments
-    WHERE scene = ? AND scope_type = ? AND scope_id = ?
-    ORDER BY created_at ASC
-    LIMIT 200
-  `).bind(scene, scopeType, scopeId).all();
+  // scope_type/scope_id are optional: omit both to list every comment in the scene.
+  const scoped = Boolean(scopeType || scopeId);
+  if (scoped && (!VALID_SCOPE_TYPES.has(scopeType) || !scopeId)) {
+    return json({ error: 'scope_type and scope_id must be provided together.' }, 400);
+  }
+
+  const columns = `id, scene, scope_type AS scopeType, scope_id AS scopeId, author, message,
+           highlight_json AS highlightJson, created_at AS createdAt`;
+  const statement = scoped
+    ? db.prepare(`SELECT ${columns} FROM comments
+        WHERE scene = ? AND scope_type = ? AND scope_id = ?
+        ORDER BY created_at ASC LIMIT 200`).bind(scene, scopeType, scopeId)
+    : db.prepare(`SELECT ${columns} FROM comments
+        WHERE scene = ?
+        ORDER BY created_at ASC LIMIT 2000`).bind(scene);
+  const { results } = await statement.all();
 
   return json({
     comments: (results ?? []).map(row => ({
@@ -43,7 +69,7 @@ export async function onRequestGet({ request, env }) {
   });
 }
 
-export async function onRequestPost({ request, env }) {
+async function handlePost({ request, env }) {
   const db = getDb(env);
   if (!db) return json({ error: 'D1 binding DB is not configured.' }, 500);
 

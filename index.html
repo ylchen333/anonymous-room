@@ -259,6 +259,17 @@ click to inspect note</div>
   manager.scene.add(selectionHalo);
   manager.scene.add(selectionAnchor);
   manager.scene.add(brushGroup);
+  const commentMarkerGroup = new THREE.Group();
+  const commentMarkerGeometry = new THREE.SphereGeometry(0.03, 12, 12);
+  const commentMarkerMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffd27a,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+  });
+  commentMarkerGroup.renderOrder = 999;
+  manager.scene.add(commentMarkerGroup);
+  const COMMENT_POLL_MS = 20000;
 
   let segmentsReady = false;
   let currentSelection = null;
@@ -388,6 +399,8 @@ click to inspect note</div>
         loadingEl.style.display = 'none';
         terminalEl.style.display = 'block';
         clickToStart.style.display = 'block';
+        refreshAllComments();
+        window.setInterval(refreshAllComments, COMMENT_POLL_MS);
         break;
       }
 
@@ -573,7 +586,11 @@ click to inspect note</div>
     const comment = await saveCommentToBackend(draft);
     comments.push(comment);
     saveLocalComments();
-    typeTerminalText(`saved comment on ${getScopeLabel(scope)} as ${comment.author}.\n\n${formatCommentLine(comment)}`);
+    updateCommentMarkers();
+    const status = comment.localOnly
+      ? `WARNING: backend unreachable (${comment.syncError}). comment kept in this browser only; others will not see it.`
+      : `saved comment on ${getScopeLabel(scope)} as ${comment.author}.`;
+    typeTerminalText(`${status}\n\n${formatCommentLine(comment)}`);
   }
 
   async function renderScopedComments() {
@@ -612,7 +629,8 @@ click to inspect note</div>
   function formatCommentLine(comment) {
     const date = new Date(comment.createdAt);
     const stamp = Number.isNaN(date.getTime()) ? 'unknown time' : date.toLocaleString();
-    return `[${stamp}] ${comment.author}: ${comment.message}`;
+    const local = comment.localOnly ? ' (only on this browser)' : '';
+    return `[${stamp}] ${comment.author}${local}: ${comment.message}`;
   }
 
   function setUsername(username) {
@@ -658,6 +676,7 @@ click to inspect note</div>
   }
 
   async function saveCommentToBackend(draft) {
+    let syncError = 'unknown error';
     try {
       const response = await fetch('/api/comments', {
         method: 'POST',
@@ -671,10 +690,13 @@ click to inspect note</div>
       const data = await response.json();
       if (data.comment) return data.comment;
     } catch (error) {
+      syncError = error.message;
       console.warn('Saving comment locally; backend write failed.', error);
     }
 
     return {
+      localOnly: true,
+      syncError,
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       scene: draft.scene,
       author: draft.author,
@@ -685,12 +707,50 @@ click to inspect note</div>
     };
   }
 
-  function buildCommentsUrl(scope) {
+  function buildCommentsUrl(scope = null) {
     const url = new URL('/api/comments', window.location.origin);
     url.searchParams.set('scene', scene.id);
-    url.searchParams.set('scope_type', scope.type);
-    url.searchParams.set('scope_id', scope.id);
+    if (scope) {
+      url.searchParams.set('scope_type', scope.type);
+      url.searchParams.set('scope_id', scope.id);
+    }
     return url;
+  }
+
+  /** Pull every comment in the scene so all viewers see what others have left. */
+  async function refreshAllComments() {
+    try {
+      const response = await fetch(buildCommentsUrl(), { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`comments api returned ${response.status}`);
+      const data = await response.json();
+      if (Array.isArray(data.comments)) {
+        mergeComments(data.comments);
+        saveLocalComments();
+      }
+    } catch (error) {
+      console.warn('Could not refresh scene comments.', error);
+    }
+    updateCommentMarkers();
+  }
+
+  /** Gold dot at the centroid of every segment that has at least one comment. */
+  function updateCommentMarkers() {
+    commentMarkerGroup.clear();
+    const counts = new Map();
+    for (const comment of comments) {
+      if (comment.scope?.type !== 'segment') continue;
+      counts.set(comment.scope.id, (counts.get(comment.scope.id) ?? 0) + 1);
+    }
+    for (const entry of manager.segments) {
+      const count = counts.get(String(entry.meta.clusterId));
+      const centroid = entry.meta.centroid;
+      if (!count || !Array.isArray(centroid)) continue;
+      const marker = new THREE.Mesh(commentMarkerGeometry, commentMarkerMaterial);
+      // Same 180° X flip the SplatMesh uses: PLY (x, y, z) -> three (x, -y, -z).
+      marker.position.set(centroid[0], -centroid[1], -centroid[2]);
+      marker.renderOrder = 999;
+      commentMarkerGroup.add(marker);
+    }
   }
 
   function mergeComments(incoming) {
